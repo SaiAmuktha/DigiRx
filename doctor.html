@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DigiRx | Doctor Dashboard</title>
+
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+
+    <!-- NAVBAR -->
+    <header class="navbar">
+        <div class="nav-content">
+            <div class="brand">
+                <div class="brand-icon">+</div>
+                <h1>DigiRx</h1>
+            </div>
+            <span class="nav-muted">Doctor Portal</span>
+        </div>
+        <button class="btn-secondary" onclick="logout()">Logout</button>
+    </header>
+
+    <!-- MAIN -->
+    <main class="container dashboard">
+
+        <!-- PATIENT LOOKUP -->
+        <section class="dashboard-card">
+            <h2>Patient Lookup</h2>
+            <p class="info-text">Enter Patient ID to load medical history and create prescriptions</p>
+
+            <div class="form-group">
+                <input
+                    type="text"
+                    id="patientIdInput"
+                    placeholder="Enter Patient ID (e.g. PID12345)"
+                    class="input-field"
+                >
+                <button class="btn-primary full-width" onclick="loadPatient()">
+                    Load Patient Records
+                </button>
+            </div>
+        </section>
+
+        <!-- PATIENT INFORMATION (Hidden until patient loaded) -->
+        <section id="patientInfoSection" class="section hidden">
+            <div class="dashboard-card">
+                <h2>Patient Information</h2>
+                <div class="patient-id-badge">
+                    Patient ID: <span id="currentPatientId" class="id-highlight">-</span>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Patient Name</label>
+                        <input type="text" id="patientName" class="input-field" placeholder="Enter name">
+                    </div>
+                    <div class="form-group">
+                        <label>Age</label>
+                        <input type="text" id="patientAge" class="input-field" placeholder="Age">
+                    </div>
+                    <div class="form-group">
+                        <label>Gender</label>
+                        <select id="patientGender" class="input-field">
+                            <option value="">Select</option>
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button class="btn-secondary" onclick="savePatientDemographics()">
+                    Save Demographics
+                </button>
+
+                <!-- Medical History Disclaimers -->
+                <div class="section-divider">
+                    <h3>Medical History & Contraindications</h3>
+                    <p class="info-text">Automatically extracted from patient's uploaded medical records</p>
+                </div>
+                <div id="patientDisclaimers" class="disclaimers-container">
+                    <p class="empty-state">No medical conditions detected</p>
+                </div>
+
+                <!-- Uploaded Reports -->
+                <div class="section-divider">
+                    <h3>Uploaded Medical Reports</h3>
+                </div>
+                <div id="patientReports">
+                    <p class="empty-state">No reports uploaded</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- PRESCRIPTION SECTION (Hidden until patient loaded) -->
+        <section id="prescriptionSection" class="section hidden">
+            
+            <!-- Clinical Assessment -->
+            <div class="dashboard-card">
+                <h2>Clinical Assessment</h2>
+                
+                <div class="form-group">
+                    <label>Chief Complaints / Symptoms</label>
+                    <textarea id="chiefComplaints" class="input-field textarea" rows="2" 
+                        placeholder="e.g., Fever, cough, body pain since 3 days"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Diagnosis</label>
+                    <textarea id="diagnosis" class="input-field textarea" rows="2" 
+                        placeholder="e.g., Viral fever, Upper respiratory tract infection"></textarea>
+                </div>
+
+                <div class="vitals-grid">
+                    <div class="form-group">
+                        <label>Blood Pressure</label>
+                        <input type="text" id="bloodPressure" class="input-field" placeholder="120/80 mmHg">
+                    </div>
+                    <div class="form-group">
+                        <label>Pulse</label>
+                        <input type="text" id="pulse" class="input-field" placeholder="72 bpm">
+                    </div>
+                    <div class="form-group">
+                        <label>Temperature</label>
+                        <input type="text" id="temperature" class="input-field" placeholder="98.6°F">
+                    </div>
+                    <div class="form-group">
+                        <label>Weight</label>
+                        <input type="text" id="weight" class="input-field" placeholder="65 kg">
+                    </div>
+                    <div class="form-group">
+                        <label>SpO2</label>
+                        <input type="text" id="spo2" class="input-field" placeholder="98%">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Physical Examination</label>
+                    <textarea id="examination" class="input-field textarea" rows="2" 
+                        placeholder="e.g., Throat congestion, mild fever"></textarea>
+                </div>
+            </div>
+
+            <!-- Voice Input Controls -->
+            <div class="dashboard-card voice-card">
+                <h2>🎤 Voice-Assisted Prescription</h2>
+                <p class="info-text">Click the microphone to start dictating prescription details</p>
+                
+                <button id="voiceBtn" class="btn-voice" onclick="toggleVoiceInput()">
+                    🎤 Start Voice Input
+                </button>
+                <div id="voiceStatus" class="voice-status"></div>
+                
+                <div class="voice-help">
+                    <strong>Voice Commands Help:</strong>
+                    <ul>
+                        <li>Say medicine names like "Paracetamol 500mg twice daily for 5 days"</li>
+                        <li>Say "next medicine" to add another prescription</li>
+                        <li>Include timing: "after food", "before food", "at bedtime"</li>
+                        <li>Say "stop" or "stop recording" when done</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Medicines List -->
+            <div class="dashboard-card">
+                <div class="medicines-header">
+                    <h2>℞ Prescription Medicines</h2>
+                    <button class="btn-secondary" onclick="addMedicineField()">+ Add Medicine</button>
+                </div>
+                
+                <div id="medicinesList" class="medicines-list">
+                    <!-- Medicine cards will be dynamically added here -->
+                </div>
+            </div>
+
+            <!-- Drug Interaction Warnings -->
+            <div id="warningSection" class="dashboard-card warning-card hidden">
+                <h2>⚠️ Drug Safety Warnings</h2>
+                <p class="warning-intro">The following medicines have contraindications with the patient's medical conditions:</p>
+                
+                <div id="warningMessages" class="warnings-container">
+                    <!-- Warnings will be populated here -->
+                </div>
+
+                <div class="acknowledgment-section">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="acknowledgeWarning">
+                        <span>I acknowledge these warnings and have considered alternative medications or adjusted dosages appropriately</span>
+                    </label>
+                    
+                    <div class="form-group">
+                        <label>Override Reason / Clinical Notes (Optional)</label>
+                        <textarea id="overrideReason" class="input-field textarea" rows="3" 
+                            placeholder="Document your clinical reasoning for proceeding despite warnings..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Instructions & Advice -->
+            <div class="dashboard-card">
+                <h2>Instructions & Follow-up</h2>
+                
+                <div class="form-group">
+                    <label>Dietary Advice</label>
+                    <textarea id="dietaryAdvice" class="input-field textarea" rows="2" 
+                        placeholder="e.g., Drink plenty of fluids, avoid cold beverages"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>General Instructions</label>
+                    <textarea id="generalInstructions" class="input-field textarea" rows="2" 
+                        placeholder="e.g., Take adequate rest, avoid strenuous activities"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>Follow-up</label>
+                    <input type="text" id="followUp" class="input-field" 
+                        placeholder="e.g., Follow up after 3 days if symptoms persist">
+                </div>
+            </div>
+
+            <!-- Save Prescription -->
+            <div class="dashboard-card action-card">
+                <button class="btn-primary btn-large full-width" onclick="savePrescription()">
+                    💾 Save & Issue Prescription
+                </button>
+                <button class="btn-secondary full-width" onclick="clearPrescription()" style="margin-top: 12px;">
+                    Clear Form
+                </button>
+
+                <div id="successMessage" class="success-message hidden">
+                    ✓ Prescription saved successfully! Patient can now view it in their portal.
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="site-footer">
+        <p>© <span id="year"></span> DigiRx — Doctor Portal</p>
+    </footer>
+
+    <script>
+    document.getElementById("year").textContent = new Date().getFullYear();
+</script>
+
+<!-- ✅ 1) ADD THIS: Supabase library -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<!-- ✅ 2) ADD THIS: Your supabase connection file -->
+<script src="supabaseClient.js"></script>
+
+<!-- ✅ 3) KEEP THIS: Your existing app logic -->
+<script src="app.js"></script>
+
+<script>
+    window.onload = function() {
+        initializeDoctorDashboard();
+    };
+</script>
+
+</body>
+</html>
