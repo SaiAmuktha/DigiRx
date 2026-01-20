@@ -838,32 +838,113 @@ async function displayPatientReportsFromDB(patientId) {
 
   if (error) {
     console.error(error);
-    container.innerHTML = "<p style='color: var(--color-text-light); font-size: var(--font-size-small);'>Failed to load reports</p>";
+    container.innerHTML =
+      "<p style='color: var(--color-text-light); font-size: var(--font-size-small);'>Failed to load reports</p>";
     return;
   }
 
   if (!data || data.length === 0) {
-    container.innerHTML = "<p style='color: var(--color-text-light); font-size: var(--font-size-small);'>No medical files uploaded by patient</p>";
+    container.innerHTML =
+      "<p style='color: var(--color-text-light); font-size: var(--font-size-small);'>No medical files uploaded by patient</p>";
     return;
   }
 
-  container.innerHTML = '<div style="display:flex;flex-direction:column;gap:var(--spacing-sm);">' +
-    data.map(r => `
-      <div style="background-color: var(--color-background); padding: var(--spacing-sm); border-radius: var(--radius-sm);">
-        <div style="display:flex; justify-content:space-between; align-items:start; gap: var(--spacing-md);">
-          <div style="flex:1;">
-            <div>📄 ${r.file_name}</div>
-            <div style="margin-top: var(--spacing-xs); font-size: var(--font-size-small); color: var(--color-text-light);">
-              ${(r.file_size/1024).toFixed(1)} KB
+  container.innerHTML =
+    '<div style="display:flex;flex-direction:column;gap:var(--spacing-sm);">' +
+    data
+      .map((r) => {
+        // ✅ Create view/download URL
+        let fileUrl = r.file_url || "";
+
+        // ✅ If file_url not stored, derive from storage using file_path
+        if (!fileUrl && r.file_path) {
+          const { data: urlData } = supabaseClient.storage
+            .from("patient_reports")
+            .getPublicUrl(r.file_path);
+
+          fileUrl = urlData?.publicUrl || "";
+        }
+
+        return `
+          <div style="background-color: var(--color-background); padding: var(--spacing-sm); border-radius: var(--radius-sm);">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap: var(--spacing-md);">
+              
+              <div style="flex:1;">
+                <div>📄 ${r.file_name}</div>
+                <div style="margin-top: var(--spacing-xs); font-size: var(--font-size-small); color: var(--color-text-light);">
+                  ${r.file_size ? (r.file_size / 1024).toFixed(1) + " KB" : ""}
+                </div>
+              </div>
+
+              <div style="display:flex; gap:10px; align-items:center;">
+                <span style="color: var(--color-text-light); font-size: var(--font-size-small); white-space: nowrap;">
+                  ${new Date(r.uploaded_at || Date.now()).toLocaleDateString()}
+                </span>
+
+                ${
+                  fileUrl
+                    ? `<a class="btn-secondary" href="${fileUrl}" target="_blank" rel="noopener noreferrer">
+                        👁️ View
+                      </a>`
+                    : `<span style="color:gray; font-size:12px;">No link</span>`
+                }
+              </div>
             </div>
           </div>
-          <span style="color: var(--color-text-light); font-size: var(--font-size-small); white-space: nowrap;">
-            ${new Date(r.uploaded_at).toLocaleDateString()}
-          </span>
-        </div>
-      </div>
-    `).join("") +
+        `;
+      })
+      .join("") +
     "</div>";
+}
+
+
+
+async function downloadReport(reportId, fileName) {
+  try {
+    // Get the file data from the database
+    const { data, error } = await supabaseClient
+      .from("reports")
+      .select("file_data")
+      .eq("id", reportId)
+      .single();
+
+    if (error || !data) {
+      alert("Failed to download report");
+      console.error(error);
+      return;
+    }
+
+    // Check if file_data is a data URL or base64
+    let binaryString;
+    if (data.file_data.startsWith('data:')) {
+      // It's a data URL, extract the base64 part
+      const base64Part = data.file_data.split(',')[1];
+      binaryString = atob(base64Part);
+    } else {
+      // It's already base64
+      binaryString = atob(data.file_data);
+    }
+
+    // Convert binary string to byte array
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    // Create a blob and download
+    const blob = new Blob([bytes], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error("Download error:", e);
+    alert("Error downloading report");
+  }
 }
 // ============================================
 // MEDICINE FIELD MANAGEMENT
@@ -1101,7 +1182,8 @@ function parsePrescriptionFromSpeech(text) {
         dosage: '',
         frequency: '',
         duration: '',
-        timing: ''
+        timing: '',
+        diagnosis: ''
     };
     
     const lowerText = text.toLowerCase();
@@ -1127,6 +1209,12 @@ function parsePrescriptionFromSpeech(text) {
     // If no medicine found, don't proceed
     if (!parsed.name) {
         return parsed;
+    }
+    
+    // Extract diagnosis if mentioned in context (e.g., "for fever", "for cough")
+    const diagnosisMatch = text.match(/\b(?:for|to treat|to manage|condition|diagnosis|diagnosed with)\s+([a-z\s]+?)(?:\.|\s+(?:tablet|capsule|medicine|dose|mg|take|twice|thrice|daily))/i);
+    if (diagnosisMatch) {
+        parsed.diagnosis = capitalizeFirstLetter(diagnosisMatch[1].trim());
     }
     
     // Extract dosage - look for numbers followed by units
@@ -1258,6 +1346,8 @@ function handleSpeechResult(event) {
     }
     
     if (finalTranscript) {
+        console.log("FINAL:", finalTranscript);
+        console.log("BUFFER:", speechBuffer);
         speechBuffer += finalTranscript;
         const lowerBuffer = speechBuffer.toLowerCase();
         // If doctor says 'stop' or 'stop recording', process text before stop and then halt recognition
@@ -1271,8 +1361,10 @@ function handleSpeechResult(event) {
                 const segments = before.split(separatorRegex).map(s => s.trim()).filter(s => s.length > 0 && !s.match(separatorRegex));
                 for (const seg of segments) {
                     // use same processing as earlier: parse and fill
-                    const parsed = parsePrescriptionSimple(seg);
-                    if (!parsed.generic && parsed.brand === 'Not specified') continue;
+                    
+                    const parsed = parsePrescriptionFromSpeech(seg);
+
+                    if (!parsed.name && !parsed.molecule && !parsed.brand) continue;
 
                     let medicineCards = document.querySelectorAll('.medicine-card');
                     let targetCard = null;
@@ -1281,14 +1373,17 @@ function handleSpeechResult(event) {
                     }
                     if (!targetCard) { addMedicineField(); targetCard = document.querySelector('.medicine-card:last-child'); }
 
-                    if (parsed.brand && parsed.brand !== 'Not specified') {
+                    if (parsed.brand) {
                         const brandInput = targetCard.querySelector('.medicine-brand');
                         if (brandInput) { brandInput.value = parsed.brand; try { brandChanged(brandInput); } catch (e) {} }
                     }
-                    if (parsed.generic && parsed.generic !== 'Unknown') {
-                        const molInput = targetCard.querySelector('.medicine-molecule'); if (molInput) molInput.value = capitalizeWords(parsed.generic);
+                    if (parsed.molecule) {
+                        const molInput = targetCard.querySelector('.medicine-molecule'); if (molInput) molInput.value = capitalizeWords(parsed.molecule);
                     }
-                    const nameInput = targetCard.querySelector('.medicine-name'); if (nameInput) nameInput.value = parsed.generic && parsed.generic !== 'Unknown' ? capitalizeWords(parsed.generic) : (parsed.brand !== 'Not specified' ? parsed.brand : nameInput.value);
+                    if (parsed.diagnosis) {
+                        const diagInput = targetCard.querySelector('.medicine-diagnosis'); if (diagInput) diagInput.value = capitalizeFirstLetter(parsed.diagnosis);
+                    }
+                    const nameInput = targetCard.querySelector('.medicine-name'); if (nameInput) nameInput.value = parsed.name ? capitalizeWords(parsed.name) : (parsed.molecule ? capitalizeWords(parsed.molecule) : (parsed.brand || nameInput.value));
                     if (parsed.dosage && parsed.dosage !== 'Not specified') targetCard.querySelector('.medicine-dosage').value = parsed.dosage;
                     if (parsed.frequency && parsed.frequency !== 'Not specified') targetCard.querySelector('.medicine-frequency').value = parsed.frequency;
                     if (parsed.duration && parsed.duration !== 'Not specified') targetCard.querySelector('.medicine-duration').value = parsed.duration;
@@ -1357,7 +1452,12 @@ function handleSpeechResult(event) {
         const hasDosageInfo = lowerBuffer.match(/\d+\s?(mg|ml|g|mcg)/i);
 
         // Relaxed condition: process when we hear a medicine name with dosage or prescription keywords
-        const shouldProcessMedicine = (hasMedicineKeyword && (hasDosageInfo || hasPrescriptionKeyword)) || lowerBuffer.match(/\b(next medicine|next prescribe|another medicine|also give|then|next)\b/i);
+        
+        const shouldProcessMedicine =
+          hasMedicineKeyword ||
+          hasDosageInfo ||
+          lowerBuffer.match(/\b(next medicine|next prescribe|another medicine|also give|then|next)\b/i);
+
 
         if (shouldProcessMedicine) {
             // Process potentially multiple medicine segments separated by keywords like "next medicine"
@@ -1365,57 +1465,71 @@ function handleSpeechResult(event) {
             let buffer = speechBuffer.trim();
 
             const processSegment = (segment) => {
-                        if (!segment || segment.trim().length === 0) return;
-                        // Use Python-style lightweight parser to detect brand/generic/dose/freq/duration/instruction
-                        const parsed = parsePrescriptionFromSpeech(segment);
+              if (!segment || segment.trim().length === 0) return;
 
-                        // parsed.generic or parsed.brand must be present to proceed
-                        if (!parsed.generic && parsed.brand === 'Not specified') return;
+              const parsed = parsePrescriptionFromSpeech(segment);
 
-                // Find first empty medicine card or create one
-                let medicineCards = document.querySelectorAll('.medicine-card');
-                let targetCard = null;
-                for (const card of medicineCards) {
-                    if (!card.querySelector('.medicine-name').value.trim()) {
-                        targetCard = card;
-                        break;
-                    }
+              // ✅ If nothing useful extracted, skip
+              if (!parsed.name && !parsed.molecule && !parsed.brand) return;
+
+              // Find empty medicine card or create one
+              let medicineCards = document.querySelectorAll('.medicine-card');
+              let targetCard = null;
+
+              for (const card of medicineCards) {
+                if (!card.querySelector('.medicine-name').value.trim()) {
+                  targetCard = card;
+                  break;
                 }
-                if (!targetCard) {
-                    addMedicineField();
-                    targetCard = document.querySelector('.medicine-card:last-child');
+              }
+
+              if (!targetCard) {
+                addMedicineField();
+                targetCard = document.querySelector('.medicine-card:last-child');
+              }
+
+              // ✅ Brand
+              if (parsed.brand) {
+                const brandInput = targetCard.querySelector('.medicine-brand');
+                if (brandInput) {
+                  brandInput.value = parsed.brand;
+                  try { brandChanged(brandInput); } catch (e) {}
                 }
+              }
 
-                // Fill brand and generic and trigger brandChanged to auto-fill molecule/name
-                if (parsed.brand && parsed.brand !== 'Not specified') {
-                    const brandInput = targetCard.querySelector('.medicine-brand');
-                    if (brandInput) {
-                        brandInput.value = parsed.brand;
-                        try { brandChanged(brandInput); } catch (e) { /* silent */ }
-                    }
-                }
+              // ✅ Molecule
+              if (parsed.molecule) {
+                const molInput = targetCard.querySelector('.medicine-molecule');
+                if (molInput) molInput.value = capitalizeWords(parsed.molecule);
+              }
 
-                if (parsed.generic && parsed.generic !== 'Unknown') {
-                    const molInput = targetCard.querySelector('.medicine-molecule');
-                    if (molInput) molInput.value = capitalizeWords(parsed.generic);
-                }
+              // ✅ Diagnosis per medicine
+              if (parsed.diagnosis) {
+                const diagInput = targetCard.querySelector('.medicine-diagnosis');
+                if (diagInput) diagInput.value = capitalizeFirstLetter(parsed.diagnosis);
+              }
 
-                // Fill per-medicine diagnosis from parsed segment
-                if (parsed.diagnosis && parsed.diagnosis !== 'Not specified') {
-                    const diagInput = targetCard.querySelector('.medicine-diagnosis');
-                    if (diagInput) diagInput.value = capitalizeFirstLetter(parsed.diagnosis);
-                }
+              // ✅ Medicine Name
+              const nameInput = targetCard.querySelector('.medicine-name');
+              if (nameInput) {
+                nameInput.value = parsed.name
+                  ? capitalizeWords(parsed.name)
+                  : (parsed.molecule ? capitalizeWords(parsed.molecule) : (parsed.brand || nameInput.value));
+              }
 
-                // Ensure medicine-name contains generic if available
-                const nameInput = targetCard.querySelector('.medicine-name');
-                if (nameInput) nameInput.value = parsed.generic && parsed.generic !== 'Unknown' ? capitalizeWords(parsed.generic) : (parsed.brand !== 'Not specified' ? parsed.brand : nameInput.value);
+              // ✅ Dosage
+              if (parsed.dosage) targetCard.querySelector('.medicine-dosage').value = parsed.dosage;
 
-                if (parsed.dosage && parsed.dosage !== 'Not specified') targetCard.querySelector('.medicine-dosage').value = parsed.dosage;
-                if (parsed.frequency && parsed.frequency !== 'Not specified') targetCard.querySelector('.medicine-frequency').value = parsed.frequency;
-                if (parsed.duration && parsed.duration !== 'Not specified') targetCard.querySelector('.medicine-duration').value = parsed.duration;
-                if (parsed.instructions && parsed.instructions !== 'None') targetCard.querySelector('.medicine-timing').value = parsed.instructions;
+              // ✅ Frequency
+              if (parsed.frequency) targetCard.querySelector('.medicine-frequency').value = parsed.frequency;
 
-                checkAllDrugInteractions();
+              // ✅ Duration
+              if (parsed.duration) targetCard.querySelector('.medicine-duration').value = parsed.duration;
+
+              // ✅ Timing
+              if (parsed.timing) targetCard.querySelector('.medicine-timing').value = parsed.timing;
+
+              checkAllDrugInteractions();
             };
 
             // Split buffer into segments using separator words, process each
@@ -1502,10 +1616,18 @@ function extractGenericSimple(brand, text) {
         return g || 'Unknown';
     }
     const lower = text.toLowerCase();
-    const MEDICINES_GENERIC = new Set(
-  Object.values(BRAND_TO_GENERIC)
-    .flatMap(v => v.split('+').map(x => x.trim().toLowerCase()))
-);
+    const medicinesGeneric = new Set(
+        Object.values(BRAND_TO_GENERIC)
+            .flatMap(v => v.split('+').map(x => x.trim().toLowerCase()))
+    );
+    
+    // Try to find a generic medicine in the text
+    for (const med of COMMON_MEDICINES) {
+        if (lower.includes(med.toLowerCase())) {
+            return med;
+        }
+    }
+    
     return 'Unknown';
 }
 
@@ -1541,7 +1663,13 @@ function extractDiagnosisSimple(text) {
     const lower = text.toLowerCase();
     if (!lower.includes('diagnosis')) return 'Not specified';
     const tokens = lower.split(/\s+/);
-    const stopWords = new Set([...Object.keys(BRAND_TO_GENERIC), ...MEDICINES_GENERIC, 'mg','ml','tablet','capsule']);
+    
+    const medicinesGeneric = new Set(
+        Object.values(BRAND_TO_GENERIC)
+            .flatMap(v => v.split('+').map(x => x.trim().toLowerCase()))
+    );
+    
+    const stopWords = new Set([...Object.keys(BRAND_TO_GENERIC), ...medicinesGeneric, 'mg','ml','tablet','capsule']);
     const out = [];
     let capture = false;
     for (const token of tokens) {
