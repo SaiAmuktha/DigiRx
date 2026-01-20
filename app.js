@@ -1075,8 +1075,9 @@ function removeMedicineField(id) {
 function getAllMedicines() {
     const medicines = [];
     const medicineCards = document.querySelectorAll('.medicine-card');
+    console.log("🔍 Found medicine cards:", medicineCards.length);
     
-    medicineCards.forEach(card => {
+    medicineCards.forEach((card, idx) => {
         const name = card.querySelector('.medicine-name').value.trim();
         const brand = (card.querySelector('.medicine-brand') && card.querySelector('.medicine-brand').value.trim()) || '';
         const molecule = (card.querySelector('.medicine-molecule') && card.querySelector('.medicine-molecule').value.trim()) || '';
@@ -1088,11 +1089,14 @@ function getAllMedicines() {
         const timing = card.querySelector('.medicine-timing').value;
         
         const finalName = name || molecule || brand;
+        console.log(`💊 Card ${idx + 1}: name="${name}", brand="${brand}", molecule="${molecule}", dosage="${dosage}"`);
+        
         if (finalName) {
             medicines.push({ name: finalName, brand, molecule, diagnosis, dosage, route, frequency, duration, timing });
         }
     });
     
+    console.log("✅ Total medicines to save:", medicines.length, medicines);
     return medicines;
 }
 
@@ -1826,12 +1830,14 @@ function displayWarnings(warnings) {
 // ============================================
 
 async function savePrescription() {
+    console.log("💾 savePrescription() called");
     if (!currentPatientId) {
         alert('Please load a patient first');
         return;
     }
     
     const medicines = getAllMedicines();
+    console.log("📋 Medicines collected:", medicines);
     
     if (medicines.length === 0) {
         alert('Please add at least one medicine');
@@ -1925,6 +1931,12 @@ async function savePrescription() {
     prescriptionData.content = prescriptionContent;
     
     try {
+  console.log("🔄 Saving prescription to Supabase...", {
+    patientId: currentPatientId,
+    medicineCount: prescriptionData.medicines.length,
+    doctorId: getCurrentUserId()
+  });
+
   // 1) Insert prescription
   const { data: presc, error } = await supabaseClient
     .from("prescriptions")
@@ -1938,7 +1950,12 @@ async function savePrescription() {
     .select()
     .single();
 
-  if (error) throw error;
+  if (error) {
+    console.error("❌ Prescription insert error:", error);
+    throw error;
+  }
+
+  console.log("✅ Prescription saved:", presc.id);
 
   // 2) Insert medicines
   const rows = prescriptionData.medicines.map(m => ({
@@ -1954,15 +1971,22 @@ async function savePrescription() {
     timing: m.timing
   }));
 
+  console.log("💊 Medicine rows to insert:", rows);
+
   if (rows.length > 0) {
     const { error: medErr } = await supabaseClient
       .from("prescription_medicines")
       .insert(rows);
 
-    if (medErr) throw medErr;
+    if (medErr) {
+      console.error("❌ Medicines insert error:", medErr);
+      throw medErr;
+    }
+    console.log("✅ Medicines saved successfully");
   }
 
   // success UI
+  console.log("✨ Prescription saved successfully!");
   document.getElementById("successMessage").classList.remove("hidden");
 
   setTimeout(() => {
@@ -1971,8 +1995,13 @@ async function savePrescription() {
   }, 3000);
 
 } catch (e) {
-  console.error(e);
-  alert("Failed to save prescription to database.");
+  console.error("❌ SAVE FAILED:", e);
+  console.error("Error details:", {
+    message: e.message,
+    code: e.code,
+    status: e.status
+  });
+  alert("Failed to save prescription: " + e.message);
 }
 
     
